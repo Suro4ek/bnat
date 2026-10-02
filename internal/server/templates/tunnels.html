@@ -1,0 +1,45 @@
+{{define "content"}}
+<h2>Online</h2>
+<div class="card">
+{{with .Data.Active}}
+<table>
+<tr><th>Name</th><th>Type</th><th>Public address</th><th>Agent</th><th>Connections</th><th>Traffic in / out</th><th></th></tr>
+{{range .}}
+<tr>
+<td><b>{{.Name}}</b><br><span class="muted">up {{ago .Since}}</span></td>
+<td>{{.Type}}{{if .Embedded}} <span class="pill">built-in sshd</span>{{end}}{{if .Local}}<br><span class="muted">→ {{.Local}}</span>{{end}}</td>
+<td>{{if eq .Type "http"}}<a href="{{.Public}}" target="_blank">{{.Public}}</a>{{else}}<code>{{.Public}}</code>{{end}}
+{{if .SSHCommand}}<br><code>{{.SSHCommand}}</code>{{end}}</td>
+<td>{{.Agent}}<br><span class="muted">{{.AgentIP}} · client {{.Token}}</span></td>
+<td>{{.Active}} active<br><span class="muted">{{.Conns}} total</span></td>
+<td>{{bytes .BytesIn}} / {{bytes .BytesOut}}</td>
+<td><form class="inline" method="post" action="/tunnels/kick"><input type="hidden" name="name" value="{{.Name}}"><button class="link">Disconnect</button></form></td>
+</tr>
+{{end}}
+</table>
+{{else}}
+<div class="empty">No tunnels online. Add a client and run <code>bnat ssh -n myhost</code> on a machine behind NAT.</div>
+{{end}}
+</div>
+
+<h2>Reserved names</h2>
+<div class="card">
+{{with .Data.Reservations}}
+<table>
+<tr><th>Name</th><th>Type</th><th>Address</th><th>Status</th><th></th></tr>
+{{range .}}
+<tr>
+<td><b>{{.Name}}</b></td>
+<td>{{.Type}}</td>
+<td><code>{{.Public}}</code></td>
+<td>{{if .Online}}<span class="pill on">online</span>{{else}}<span class="pill">last seen {{ago .LastSeen}}</span>{{end}}</td>
+<td>{{if not .Online}}<form class="inline" method="post" action="/reservations/delete" onsubmit="return confirm('Release {{.Name}}? Its port/name can be taken by another tunnel.')"><input type="hidden" name="name" value="{{.Name}}"><button class="link">Release</button></form>{{end}}</td>
+</tr>
+{{end}}
+</table>
+<div class="hint">A name keeps its type and port across reconnects until released.</div>
+{{else}}
+<div class="empty">Nothing reserved yet.</div>
+{{end}}
+</div>
+{{end}}

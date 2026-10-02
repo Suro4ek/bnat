@@ -1,0 +1,14 @@
+[Unit]
+Description=bnat tunnel server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/bnat server --domain bnat.example.com --tcp-host tun.bnat.example.com --data /var/lib/bnat
+Restart=always
+DynamicUser=yes
+StateDirectory=bnat
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

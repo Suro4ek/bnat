@@ -1,0 +1,36 @@
+{{define "content"}}
+<h2>Custom domains</h2>
+<div class="card">
+{{with .Data.Domains}}
+<table>
+<tr><th>Domain</th><th>Tunnel</th><th>Status</th><th></th></tr>
+{{range .}}
+<tr>
+<td><b>{{.Host}}</b></td>
+<td>{{.Tunnel}}</td>
+<td>{{if .Verified}}<span class="pill on">verified</span>{{else}}<span class="pill bad">not verified</span>{{with .Error}}<br><span class="muted">{{.}}</span>{{end}}{{end}}</td>
+<td style="white-space:nowrap">
+<form class="inline" method="post" action="/domains/verify"><input type="hidden" name="host" value="{{.Host}}"><button class="ghost">Check DNS</button></form>
+<form class="inline" method="post" action="/domains/delete" onsubmit="return confirm('Remove {{.Host}}?')"><input type="hidden" name="host" value="{{.Host}}"><button class="link">Remove</button></form>
+</td>
+</tr>
+{{end}}
+</table>
+{{else}}
+<div class="empty">No custom domains.</div>
+{{end}}
+<div class="hint">Point the domain at this server with <code>CNAME app.yoursite.com → {{.Domain}}</code> (or an A record with the same IP for apex domains), then press “Check DNS”. Once verified, a TLS certificate is issued on first request.</div>
+</div>
+
+<h2>Attach domain to an HTTP tunnel</h2>
+<div class="card">
+<form class="add" method="post" action="/domains">
+<div class="row">
+<input name="host" placeholder="app.yoursite.com" required>
+<input name="tunnel" placeholder="Tunnel name" list="http-tunnels" required>
+<button style="flex:0">Add</button>
+</div>
+{{with .Data.HTTPTunnels}}<datalist id="http-tunnels">{{range .}}<option value="{{.}}">{{end}}</datalist>{{end}}
+</form>
+</div>
+{{end}}

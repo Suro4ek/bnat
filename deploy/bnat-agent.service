@@ -1,0 +1,14 @@
+# Agent on the machine behind NAT. Install as a user unit:
+#   cp bnat-agent.service ~/.config/systemd/user/ && systemctl --user enable --now bnat-agent
+#   loginctl enable-linger $USER   # keep running after logout
+[Unit]
+Description=bnat ssh tunnel
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/bnat ssh -n %l
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

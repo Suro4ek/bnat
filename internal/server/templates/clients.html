@@ -1,0 +1,52 @@
+{{define "content"}}
+{{with .Data.Code}}
+<div class="card" style="margin-bottom:20px">
+<div style="padding:18px;text-align:center">
+<div class="muted">Pairing code for <b>{{.Name}}</b> · one-time, valid {{.Minutes}} minutes</div>
+<div style="font:600 34px ui-monospace,Menlo,monospace;letter-spacing:.12em;margin:10px 0">{{.Code}}</div>
+<div class="muted">Run on the client machine:</div>
+<pre>{{.Login}}</pre>
+</div>
+</div>
+{{end}}
+
+<h2>Clients</h2>
+<div class="card">
+{{with .Data.Clients}}
+<table>
+<tr><th>Name</th><th>Machine</th><th>Status</th><th>Last connected</th><th></th></tr>
+{{range .}}
+<tr>
+<td><b>{{.Name}}</b><br><span class="muted">added {{ago .Created}}</span></td>
+<td>{{if .Paired}}{{.User}}@{{.Hostname}}<br><span class="muted">paired {{ago .PairedAt}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+<td>
+{{if index $.Data.Online .ID}}<span class="pill on">online</span>
+{{else if .Paired}}<span class="pill">offline</span>
+{{else if .PairPending}}<span class="pill">waiting for code</span>
+{{else}}<span class="pill bad">code expired</span>{{end}}
+{{if and .Paired .PairPending}}<br><span class="muted">re-pairing code issued</span>{{end}}
+</td>
+<td>{{ago .LastUsed}}</td>
+<td style="white-space:nowrap">
+<form class="inline" method="post" action="/clients/code" {{if .Paired}}onsubmit="return confirm('Issue a new code for {{.Name}}? Once it is used, the old machine is unpaired.')"{{end}}><input type="hidden" name="id" value="{{.ID}}"><button class="ghost">New code</button></form>
+<form class="inline" method="post" action="/clients/delete" onsubmit="return confirm('Remove {{.Name}}? Its agents will be disconnected.')"><input type="hidden" name="id" value="{{.ID}}"><button class="link">Remove</button></form>
+</td>
+</tr>
+{{end}}
+</table>
+{{else}}
+<div class="empty">No clients yet.</div>
+{{end}}
+<div class="hint">Each client is one machine running bnat. Create it here, then run <code>bnat login</code> with the code on that machine — the code is exchanged for a permanent key and can't be reused.</div>
+</div>
+
+<h2>Add client</h2>
+<div class="card">
+<form class="add" method="post" action="/clients">
+<div class="row">
+<input name="name" placeholder="Name, e.g. home-server" required>
+<button style="flex:0">Create &amp; get code</button>
+</div>
+</form>
+</div>
+{{end}}

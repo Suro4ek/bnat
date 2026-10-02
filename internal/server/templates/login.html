@@ -1,0 +1,10 @@
+{{define "content"}}
+<div class="card" style="max-width:360px;margin:80px auto">
+<form class="add" method="post" action="/login">
+<b style="font-size:16px">bnat admin</b>
+<span class="muted">{{.Domain}}</span>
+<input type="password" name="password" placeholder="Admin password" autofocus required>
+<button>Log in</button>
+</form>
+</div>
+{{end}}

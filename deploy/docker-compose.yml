@@ -1,0 +1,12 @@
+services:
+  bnat:
+    build: ..
+    restart: unless-stopped
+    network_mode: host # tunnel ports are allocated dynamically
+    volumes:
+      - ./data:/data
+    environment:
+      BNAT_DOMAIN: bnat.example.com
+      BNAT_TCP_HOST: tun.bnat.example.com
+      BNAT_ACME_EMAIL: you@example.com
+      # BNAT_ADMIN_PASSWORD: change-me  # otherwise generated and printed to logs on first start

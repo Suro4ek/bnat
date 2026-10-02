@@ -1,0 +1,35 @@
+{{define "content"}}
+<h2>Trusted SSH keys</h2>
+<div class="card">
+{{with .Data.Keys}}
+<table>
+<tr><th>Name</th><th>Fingerprint</th><th>Allowed tunnels</th><th>Added</th><th></th></tr>
+{{range .}}
+<tr>
+<td><b>{{.Name}}</b></td>
+<td><code>{{.Fingerprint}}</code></td>
+<td>{{if .Tunnels}}{{join .Tunnels ", "}}{{else}}<span class="pill on">all</span>{{end}}</td>
+<td>{{ago .Created}}</td>
+<td><form class="inline" method="post" action="/keys/delete" onsubmit="return confirm('Remove key {{.Name}}?')"><input type="hidden" name="id" value="{{.ID}}"><button class="link">Remove</button></form></td>
+</tr>
+{{end}}
+</table>
+{{else}}
+<div class="empty">No keys yet — nobody can log in to built-in SSH tunnels.</div>
+{{end}}
+<div class="hint">Keys apply to tunnels started with <code>bnat ssh</code> (built-in sshd) and are pushed to agents instantly. Tunnels with <code>--local</code> use the target sshd's own authorized_keys.</div>
+</div>
+
+<h2>Add key</h2>
+<div class="card">
+<form class="add" method="post" action="/keys">
+<textarea name="key" placeholder="ssh-ed25519 AAAAC3Nz... user@laptop" required></textarea>
+<div class="row">
+<input name="name" placeholder="Name (defaults to key comment)">
+<input name="tunnels" placeholder="Tunnels, comma separated (empty = all)" list="ssh-tunnels">
+<button style="flex:0">Add</button>
+</div>
+{{with .Data.SSHTunnels}}<datalist id="ssh-tunnels">{{range .}}<option value="{{.}}">{{end}}</datalist>{{end}}
+</form>
+</div>
+{{end}}
