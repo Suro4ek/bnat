@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/suro/bnat/internal/proto"
+	"github.com/Suro4ek/bnat/internal/proto"
 )
 
 //go:embed templates/*.html

@@ -24,7 +24,7 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/suro/bnat/internal/proto"
+	"github.com/Suro4ek/bnat/internal/proto"
 )
 
 type Config struct {

@@ -22,7 +22,7 @@ import (
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/suro/bnat/internal/proto"
+	"github.com/Suro4ek/bnat/internal/proto"
 )
 
 // SSHServer is a minimal SSH server running inside the agent. Users are

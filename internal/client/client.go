@@ -19,7 +19,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/hashicorp/yamux"
 
-	"github.com/suro/bnat/internal/proto"
+	"github.com/Suro4ek/bnat/internal/proto"
 )
 
 // Handler serves one public connection delivered through the tunnel.

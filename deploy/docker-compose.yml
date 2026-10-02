@@ -1,6 +1,6 @@
 services:
   bnat:
-    build: ..
+    image: ghcr.io/suro4ek/bnat:latest  # or: build: ..
     restart: unless-stopped
     network_mode: host # tunnel ports are allocated dynamically
     volumes:

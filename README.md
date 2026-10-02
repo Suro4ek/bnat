@@ -33,10 +33,9 @@ A  tun.bnat.example.com  → 1.2.3.4   # (опционально) красиво
 
 Открыть порты: `80`, `443`, `20000-29999/tcp`.
 
+Бинарники для Linux, macOS и Windows лежат в [Releases](https://github.com/Suro4ek/bnat/releases). Docker-образ: `ghcr.io/suro4ek/bnat`. Если есть Go, можно поставить так: `go install github.com/Suro4ek/bnat/cmd/bnat@latest`.
+
 ```bash
-CGO_ENABLED=0 GOOS=linux go build -o bnat ./cmd/bnat
-scp bnat root@vps:/usr/local/bin/
-ssh root@vps
 bnat server --domain bnat.example.com --tcp-host tun.bnat.example.com --data /var/lib/bnat
 ```
 
@@ -70,12 +69,27 @@ bnat ssh -n nas --local 192.168.1.10:22    # SSH другой машины в л
 
 Для постоянной работы есть `deploy/bnat-agent.service` (systemd user unit).
 
+## CI/CD
+
+- **CI** (`.github/workflows/ci.yml`) запускается на каждый push и PR: gofmt, `go mod tidy`, `go vet`, тесты с `-race` на Linux и macOS, кросс-сборка под все платформы, сборка Docker-образа. В тестах есть e2e-сценарий: сервер, привязка по коду, TCP-, HTTP- и SSH-туннели.
+- **Release** (`.github/workflows/release.yml`) запускается по тегу:
+  ```bash
+  git tag v0.1.0 && git push origin v0.1.0
+  ```
+  Сначала идут тесты, затем GoReleaser собирает бинарники с чек-суммами и публикует GitHub Release, а образ `ghcr.io/suro4ek/bnat:{0.1.0,0.1,latest}` собирается под amd64 и arm64. Теги вида `v0.2.0-rc1` публикуются как pre-release, и `latest` на них не ставится.
+- **Deploy** (`.github/workflows/deploy.yml`) после релиза обновляет бинарник на VPS по SSH и перезапускает `bnat-server`. Его можно запустить и вручную из вкладки Actions. Пока не настроен, он просто пропускается. Настройка в Settings → Secrets and variables → Actions:
+  - variable `DEPLOY_HOST`: `bnat.example.com`
+  - variable `DEPLOY_USER`: по умолчанию `root`; другому пользователю нужен sudo без пароля
+  - secret `DEPLOY_SSH_KEY`: приватный ключ для входа на VPS
+  - secret `DEPLOY_KNOWN_HOSTS`: вывод `ssh-keyscan bnat.example.com`
+
 ## Локальная разработка
 
 ```bash
 go build -o bin/bnat ./cmd/bnat
 bin/bnat server --domain localhost --tls=false --http :8080 --admin-password dev
 # админка: http://localhost:8080, туннели: http://<name>.localhost:8080
+go test -race ./...
 ```
 
 ## Модель безопасности и ограничения

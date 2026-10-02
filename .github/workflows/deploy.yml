@@ -1,0 +1,76 @@
+name: Deploy
+
+# Updates the bnat server on your VPS over SSH and restarts it.
+# Runs after each release, or manually from the Actions tab.
+#
+# Setup (Settings → Secrets and variables → Actions):
+#   variable DEPLOY_HOST         e.g. bnat.example.com  (deploy is skipped while unset)
+#   variable DEPLOY_USER         e.g. root (default)
+#   secret   DEPLOY_SSH_KEY      private key allowed to log in to the VPS
+#   secret   DEPLOY_KNOWN_HOSTS  output of `ssh-keyscan bnat.example.com` (recommended)
+# The server must run deploy/bnat-server.service (unit name: bnat-server).
+# A non-root DEPLOY_USER needs passwordless sudo for install and systemctl.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag to deploy (e.g. v0.1.0)
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.DEPLOY_HOST != ''
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER || 'root' }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: download release binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --pattern '*linux_amd64.tar.gz' --pattern 'checksums.txt'
+          sha256sum --check --ignore-missing checksums.txt
+          tar xzf ./*linux_amd64.tar.gz bnat
+
+      - name: configure ssh
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          if [ -n "$KNOWN_HOSTS" ]; then
+            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning::DEPLOY_KNOWN_HOSTS is not set, trusting the host key on first use"
+            ssh-keyscan -H "$HOST" > ~/.ssh/known_hosts
+          fi
+
+      - name: upload and restart
+        run: |
+          SSH="ssh -i ~/.ssh/id_deploy $DEPLOY_USER@$HOST"
+          SUDO=$([ "$DEPLOY_USER" = root ] && echo "" || echo sudo)
+          scp -i ~/.ssh/id_deploy bnat "$DEPLOY_USER@$HOST:/tmp/bnat.new"
+          $SSH "$SUDO install -m 755 /tmp/bnat.new /usr/local/bin/bnat && rm /tmp/bnat.new && $SUDO systemctl restart bnat-server"
+          sleep 3
+          $SSH "systemctl is-active bnat-server && /usr/local/bin/bnat version"
+
+      - name: health check
+        run: |
+          curl -fsS -o /dev/null -w "admin panel: HTTP %{http_code}\n" "https://$HOST/login"

@@ -1,4 +1,4 @@
-module github.com/suro/bnat
+module github.com/Suro4ek/bnat
 
 go 1.26.2
 

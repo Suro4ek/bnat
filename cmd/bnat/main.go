@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/suro/bnat/internal/client"
-	"github.com/suro/bnat/internal/proto"
-	"github.com/suro/bnat/internal/server"
+	"github.com/Suro4ek/bnat/internal/client"
+	"github.com/Suro4ek/bnat/internal/proto"
+	"github.com/Suro4ek/bnat/internal/server"
 )
 
 var version = "dev"
