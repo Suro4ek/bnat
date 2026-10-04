@@ -1,0 +1,20 @@
+# bnat server on a public VPS.
+#
+#   cp .env.example .env && $EDITOR .env
+#   docker compose up -d
+#   docker compose logs bnat | grep password   # if BNAT_ADMIN_PASSWORD is empty
+#
+# DNS: A records for bnat.example.com, *.bnat.example.com and tun.bnat.example.com
+# pointing to this server. Firewall: open 80, 443 and the BNAT_PORTS range.
+
+services:
+  bnat:
+    image: ghcr.io/suro4ek/bnat:latest
+    command: server
+    restart: unless-stopped
+    # Tunnel ports are opened on demand, so host networking is simpler than
+    # publishing thousands of ports.
+    network_mode: host
+    env_file: .env
+    volumes:
+      - ./data:/data # bnat.json (clients, keys, domains) and TLS certificates

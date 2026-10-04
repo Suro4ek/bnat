@@ -228,3 +228,20 @@ func sshRun(addr string, key ssh.Signer, cmd string) (string, error) {
 	out, err := sess.Output(cmd)
 	return string(out), err
 }
+
+// Agents may reach the server by an internal name (docker service, IP), while
+// other paths on unknown hosts stay 404.
+func TestAgentAPIOnAnyHost(t *testing.T) {
+	s, err := New(Config{Domain: "bnat.example.com", HTTPAddr: ":0", DataDir: t.TempDir(), AdminPassword: "x", PortMin: 1, PortMax: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]int{proto.PairPath: http.StatusForbidden, "/": http.StatusNotFound} {
+		req := httptest.NewRequest("POST", "http://bnat:8080"+path, strings.NewReader(`{"code":"NOPE-NOPE"}`))
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("POST %s on unknown host: got %d, want %d", path, rec.Code, want)
+		}
+	}
+}

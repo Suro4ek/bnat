@@ -10,6 +10,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 FROM alpine:3
 RUN apk add --no-cache ca-certificates
 COPY --from=build /bnat /usr/local/bin/bnat
-VOLUME /data
-ENV BNAT_DATA=/data
-ENTRYPOINT ["bnat", "server"]
+# Server state (bnat.json, certificates) and agent config/host key.
+ENV BNAT_DATA=/data BNAT_CONFIG_DIR=/config
+ENTRYPOINT ["bnat"]
+CMD ["server"]

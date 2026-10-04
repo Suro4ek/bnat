@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -200,7 +201,7 @@ func runTunnel(typ string, args []string) error {
 	fs.Parse(reorder(args))
 	setupLog(*debug)
 
-	cfg, err := client.LoadConfig()
+	cfg, err := loadOrPair()
 	if err != nil {
 		return err
 	}
@@ -253,6 +254,38 @@ func runTunnel(typ string, args []string) error {
 	defer cancel()
 	c := &client.Client{Config: cfg, Tunnels: []client.Tunnel{{Req: req, Handler: h}}}
 	return c.Run(ctx)
+}
+
+// loadOrPair loads the saved config. If there is none and BNAT_SERVER plus
+// BNAT_PAIR_CODE are set (e.g. in a container), it pairs first and saves the
+// result, so later restarts reuse the token.
+func loadOrPair() (client.Config, error) {
+	cfg, err := client.LoadConfig()
+	if err == nil {
+		return cfg, nil
+	}
+	srv, code := os.Getenv("BNAT_SERVER"), os.Getenv("BNAT_PAIR_CODE")
+	switch {
+	case srv == "":
+		return cfg, err
+	case code == "" && os.Getenv("BNAT_TOKEN") == "":
+		return cfg, errors.New("no saved token: set BNAT_PAIR_CODE to a code from the admin panel (Clients → Add client)")
+	case code == "":
+		return cfg, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	resp, err := client.Pair(ctx, strings.TrimRight(srv, "/"), code)
+	if err != nil {
+		return cfg, fmt.Errorf("pairing with BNAT_PAIR_CODE failed: %w", err)
+	}
+	cfg = client.Config{Server: strings.TrimRight(srv, "/"), Token: resp.Token}
+	p, err := client.SaveConfig(cfg)
+	if err != nil {
+		return cfg, err
+	}
+	slog.Info("paired", "client", resp.Name, "config", p)
+	return cfg, nil
 }
 
 // reorder moves positional args after flags so "bnat http 3000 -n app" works.

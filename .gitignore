@@ -1,3 +1,5 @@
 /bin/
 /data/
 /dist/
+examples/server/.env
+examples/server/data/

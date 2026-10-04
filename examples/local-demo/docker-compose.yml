@@ -1,0 +1,60 @@
+# bnat on one machine: server + agents + a demo web app. No domain or TLS needed.
+#
+#   1. docker compose up -d bnat
+#   2. Open http://localhost:8080 (password: demo) → Clients → add "demo" → copy the code
+#   3. BNAT_PAIR_CODE=XXXX-XXXX docker compose up -d
+#   4. Open http://whoami.localhost:8080
+#      (or: curl -H 'Host: whoami.localhost' localhost:8080)
+#   5. SSH keys → add your ~/.ssh/id_ed25519.pub, then:
+#        docker compose logs agent-ssh      # shows the port
+#        ssh -p 2000X demo@localhost        # lands in the agent container
+#
+# The pairing code is only needed once: the token is kept in the agent-config volume.
+# Port 8080 busy? Prefix every command with BNAT_PORT=18080 (or put it in .env).
+
+services:
+  bnat:
+    build: ../..
+    command: server --domain localhost --tls=false --http :${BNAT_PORT:-8080} --ports 20000-20009
+    environment:
+      BNAT_ADMIN_PASSWORD: demo
+    ports:
+      - "${BNAT_PORT:-8080}:${BNAT_PORT:-8080}"
+      - "20000-20009:20000-20009" # ssh/tcp tunnels
+    volumes:
+      - bnat-data:/data
+    restart: unless-stopped
+
+  # The service we expose. Not published: only reachable through the tunnel.
+  whoami:
+    image: traefik/whoami
+
+  agent-web:
+    build: ../..
+    command: http -n whoami whoami:80
+    environment:
+      BNAT_SERVER: http://bnat:${BNAT_PORT:-8080}
+      BNAT_PAIR_CODE: ${BNAT_PAIR_CODE:-}
+    volumes:
+      - agent-config:/config
+    healthcheck: # healthy once paired
+      test: ["CMD", "test", "-f", "/config/config.json"]
+      interval: 2s
+      retries: 15
+    depends_on: [bnat, whoami]
+    restart: unless-stopped
+
+  # Built-in sshd: shares the token with agent-web, keys come from the admin panel.
+  agent-ssh:
+    build: ../..
+    command: ssh -n demo
+    volumes:
+      - agent-config:/config
+    depends_on:
+      agent-web:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  bnat-data:
+  agent-config:

@@ -250,15 +250,9 @@ func (s *Server) subdomain(host string) (string, bool) {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	host := strings.ToLower(stripPort(r.Host))
 	if host == s.cfg.Domain {
-		switch r.URL.Path {
-		case proto.AgentPath:
-			s.handleAgent(w, r)
-			return
-		case proto.PairPath:
-			s.handlePair(w, r)
-			return
+		if !s.serveAgentAPI(w, r) {
+			s.adminHandler.ServeHTTP(w, r)
 		}
-		s.adminHandler.ServeHTTP(w, r)
 		return
 	}
 	if name, ok := s.subdomain(host); ok {
@@ -269,7 +263,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.proxyHTTP(w, r, d.Tunnel)
 		return
 	}
+	// Agents may also reach us by IP or an internal name (e.g. a docker
+	// service name); tunnel hosts are matched above, so nothing is shadowed.
+	if s.serveAgentAPI(w, r) {
+		return
+	}
 	http.Error(w, "bnat: unknown host "+host, http.StatusNotFound)
+}
+
+func (s *Server) serveAgentAPI(w http.ResponseWriter, r *http.Request) bool {
+	switch r.URL.Path {
+	case proto.AgentPath:
+		s.handleAgent(w, r)
+	case proto.PairPath:
+		s.handlePair(w, r)
+	default:
+		return false
+	}
+	return true
 }
 
 func (s *Server) proxyHTTP(w http.ResponseWriter, r *http.Request, name string) {

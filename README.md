@@ -33,13 +33,35 @@ A  tun.bnat.example.com  → 1.2.3.4   # (опционально) красиво
 
 Открыть порты: `80`, `443`, `20000-29999/tcp`.
 
-Бинарники для Linux, macOS и Windows лежат в [Releases](https://github.com/Suro4ek/bnat/releases). Docker-образ: `ghcr.io/suro4ek/bnat`. Если есть Go, можно поставить так: `go install github.com/Suro4ek/bnat/cmd/bnat@latest`.
+Бинарники для Linux, macOS и Windows лежат в [Releases](https://github.com/Suro4ek/bnat/releases). Docker-образ: `ghcr.io/suro4ek/bnat` (по умолчанию запускает `bnat server`, для агента — `docker run ghcr.io/suro4ek/bnat http …`). Если есть Go, можно поставить так: `go install github.com/Suro4ek/bnat/cmd/bnat@latest`.
 
 ```bash
 bnat server --domain bnat.example.com --tcp-host tun.bnat.example.com --data /var/lib/bnat
 ```
 
-На первом запуске в лог печатается сгенерированный пароль админки (или задайте `--admin-password` / `BNAT_ADMIN_PASSWORD`). Готовые юниты лежат в `deploy/`: `bnat-server.service` и `docker-compose.yml`.
+На первом запуске в лог печатается сгенерированный пароль админки (или задайте `--admin-password` / `BNAT_ADMIN_PASSWORD`). Для systemd есть готовый юнит `deploy/bnat-server.service`.
+
+## Docker
+
+Примеры в [`examples/`](examples):
+
+| Пример | Что внутри |
+|---|---|
+| [`local-demo`](examples/local-demo/docker-compose.yml) | Всё на одной машине без домена и TLS: сервер, тестовое приложение whoami, HTTP- и SSH-агенты. Удобно, чтобы посмотреть, как всё работает. |
+| [`server`](examples/server/docker-compose.yml) | Сервер для VPS: `cp .env.example .env`, вписать домен, `docker compose up -d`. |
+| [`agent`](examples/agent/docker-compose.yml) | Агент на домашней машине: публикует веб-приложение из того же compose-проекта и SSH самого хоста. |
+
+Быстрый старт демо:
+
+```bash
+cd examples/local-demo
+docker compose up -d bnat
+# http://localhost:8080, пароль demo → Clients → добавить клиента → скопировать код
+BNAT_PAIR_CODE=XXXX-XXXX docker compose up -d
+curl -H 'Host: whoami.localhost' localhost:8080
+```
+
+Агенту в контейнере не нужен интерактивный `bnat login`. Достаточно передать `BNAT_SERVER` и `BNAT_PAIR_CODE`: при первом запуске он сам привяжется и сохранит токен в `/config`. Этот путь стоит смонтировать как volume, тогда при перезапусках код больше не понадобится.
 
 Если перед bnat уже стоит Caddy/nginx с TLS, запускайте `--tls=false --http 127.0.0.1:8080 --public-scheme https` и проксируйте на него `bnat.example.com` и `*.bnat.example.com`, не забыв про WebSocket upgrade.
 

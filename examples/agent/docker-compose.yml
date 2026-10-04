@@ -1,0 +1,58 @@
+# bnat agent on a machine behind NAT: publishes a web app and SSH to the host.
+#
+#   1. Admin panel → Clients → add "home" → copy the code
+#   2. BNAT_PAIR_CODE=XXXX-XXXX docker compose up -d
+#   3. https://myapp.bnat.example.com and `ssh -p <port> you@tun.bnat.example.com`
+#      (the port is shown in the admin panel and in `docker compose logs bnat-ssh`)
+#
+# The code is used once; the token then lives in the bnat-config volume.
+
+x-bnat: &bnat
+  image: ghcr.io/suro4ek/bnat:latest
+  restart: unless-stopped
+  environment:
+    BNAT_SERVER: https://bnat.example.com
+    BNAT_PAIR_CODE: ${BNAT_PAIR_CODE:-}
+  volumes:
+    - bnat-config:/config
+
+services:
+  # Any app from this compose project, addressed by service name.
+  app:
+    image: nginx:alpine
+
+  bnat-web:
+    <<: *bnat
+    command: http -n myapp app:80
+    healthcheck: # healthy once paired
+      test: ["CMD", "test", "-f", "/config/config.json"]
+      interval: 2s
+      retries: 15
+    depends_on: [app]
+
+  # SSH to the host itself through its own sshd (uses the host's authorized_keys).
+  # For keys managed in the admin panel instead, run `bnat ssh` directly on the host
+  # (see deploy/bnat-agent.service): inside a container the built-in sshd would
+  # only give a shell in that container.
+  bnat-ssh:
+    <<: *bnat
+    command: ssh -n home --local host.docker.internal:22
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      bnat-web:
+        condition: service_healthy
+
+  # Raw TCP, e.g. a database: tun.bnat.example.com:<port>
+  # postgres:
+  #   image: postgres:17
+  #   environment: { POSTGRES_PASSWORD: change-me }
+  # bnat-pg:
+  #   <<: *bnat
+  #   command: tcp -n pg postgres:5432
+  #   depends_on:
+  #     bnat-web:
+  #       condition: service_healthy
+
+volumes:
+  bnat-config:
