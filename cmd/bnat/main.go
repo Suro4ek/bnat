@@ -106,6 +106,8 @@ func runServer(args []string) error {
 	fs.StringVar(&c.AdminPassword, "admin-password", env("BNAT_ADMIN_PASSWORD", ""), "admin password; generated on first start if empty (env BNAT_ADMIN_PASSWORD)")
 	fs.StringVar(&c.TCPBind, "tcp-bind", env("BNAT_TCP_BIND", ""), "address tcp/ssh tunnel ports bind to (env BNAT_TCP_BIND)")
 	fs.StringVar(&ports, "ports", env("BNAT_PORTS", "20000-29999"), "port range for tcp/ssh tunnels (env BNAT_PORTS)")
+	fs.StringVar(&c.ReleasesHost, "releases-host", env("BNAT_RELEASES_HOST", ""), "serve install.sh and mirrored releases on this host, e.g. release.bnat.example.com (env BNAT_RELEASES_HOST)")
+	fs.StringVar(&c.ReleasesUpstream, "releases-upstream", env("BNAT_RELEASES_UPSTREAM", ""), "GitHub releases URL to mirror (default https://github.com/Suro4ek/bnat/releases) (env BNAT_RELEASES_UPSTREAM)")
 	trusted := fs.String("trusted-proxies", env("BNAT_TRUSTED_PROXIES", ""), `reverse proxies whose X-Forwarded-* headers are trusted: IPs/CIDRs, or "private" (env BNAT_TRUSTED_PROXIES)`)
 	debug := fs.Bool("debug", false, "verbose logging")
 	fs.Parse(args)

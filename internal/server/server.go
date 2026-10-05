@@ -44,6 +44,11 @@ type Config struct {
 	// TrustedProxies are reverse proxies in front of bnat whose
 	// X-Forwarded-For/Proto/Host headers are believed.
 	TrustedProxies []netip.Prefix
+	// ReleasesHost, if set, serves install.sh and mirrored bnat releases
+	// (for clients that can't reach GitHub), e.g. release.bnat.example.com.
+	ReleasesHost string
+	// ReleasesUpstream is where releases are mirrored from.
+	ReleasesUpstream string // default https://github.com/Suro4ek/bnat/releases
 }
 
 type Server struct {
@@ -56,6 +61,7 @@ type Server struct {
 	sessions map[*agentSession]struct{}
 
 	adminHandler http.Handler
+	mirror       *mirror // nil unless ReleasesHost is set
 	pairLimit    limiter
 }
 
@@ -144,6 +150,13 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 	s.adminHandler = s.admin()
+	if cfg.ReleasesHost != "" {
+		s.cfg.ReleasesHost = strings.ToLower(cfg.ReleasesHost)
+		if s.cfg.ReleasesUpstream == "" {
+			s.cfg.ReleasesUpstream = "https://github.com/Suro4ek/bnat/releases"
+		}
+		s.mirror = newMirror(s.cfg.PublicScheme+"://"+s.cfg.ReleasesHost+s.publicPort(), s.cfg.ReleasesUpstream, filepath.Join(cfg.DataDir, "releases"), s.log)
+	}
 	return s, nil
 }
 
@@ -229,7 +242,7 @@ func (s *Server) Run(ctx context.Context) error {
 // subdomains can't burn through Let's Encrypt rate limits.
 func (s *Server) hostPolicy(_ context.Context, host string) error {
 	host = strings.ToLower(host)
-	if host == s.cfg.Domain {
+	if host == s.cfg.Domain || (s.mirror != nil && host == s.cfg.ReleasesHost) {
 		return nil
 	}
 	if name, ok := s.subdomain(host); ok {
@@ -253,6 +266,10 @@ func (s *Server) subdomain(host string) (string, bool) {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	host := strings.ToLower(stripPort(r.Host))
+	if s.mirror != nil && host == s.cfg.ReleasesHost {
+		s.mirror.ServeHTTP(w, r)
+		return
+	}
 	if host == s.cfg.Domain {
 		if !s.serveAgentAPI(w, r) {
 			s.adminHandler.ServeHTTP(w, r)
@@ -489,6 +506,9 @@ func (s *Server) register(a *agentSession, req proto.TunnelReq) proto.TunnelInfo
 	}
 	if !proto.ValidName(req.Name) {
 		return fail("invalid name %q: use a-z, 0-9 and '-'", req.Name)
+	}
+	if s.mirror != nil && req.Name+"."+s.cfg.Domain == s.cfg.ReleasesHost {
+		return fail("name %q is reserved for the release mirror", req.Name)
 	}
 	if s.tunnels[req.Name] != nil {
 		return fail("tunnel %q is already connected", req.Name)

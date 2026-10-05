@@ -64,6 +64,9 @@ services:
       # Safe because port 8080 is not published, only Traefik can reach it.
       BNAT_TRUSTED_PROXIES: private
       BNAT_PORTS: 20000-20099
+      # Mirror of install.sh + releases for clients without GitHub access.
+      # A subdomain of BNAT_DOMAIN is already covered by the router and wildcard cert below.
+      BNAT_RELEASES_HOST: ${BNAT_RELEASES_HOST:-}
     ports:
       - "20000-20099:20000-20099" # ssh/tcp tunnels, straight to bnat
     volumes:

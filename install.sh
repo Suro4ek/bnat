@@ -10,7 +10,9 @@
 #                     or ~/.local/bin without sudo)
 #   BNAT_FORCE=1      reinstall even if this version is already installed
 #   BNAT_REPO         GitHub repo to download from (default: Suro4ek/bnat)
-#   BNAT_DOWNLOAD_BASE  releases URL override, for mirrors (default: https://github.com/$BNAT_REPO/releases)
+#   BNAT_DOWNLOAD_BASE  where releases are downloaded from (default: GitHub)
+#   BNAT_FALLBACK_BASE  used when that is unreachable (default: the release.bnat.ctai.dev
+#                       mirror; set to "" to disable)
 #
 # The whole script is wrapped in main() so a truncated download never runs half of it.
 
@@ -19,16 +21,20 @@ set -eu
 main() {
 	repo="${BNAT_REPO:-Suro4ek/bnat}"
 	version="${BNAT_VERSION:-latest}"
-	base="${BNAT_DOWNLOAD_BASE:-https://github.com/$repo/releases}"
+	# The bnat server's release mirror rewrites these two lines when serving this script.
+	primary="${BNAT_DOWNLOAD_BASE:-https://github.com/$repo/releases}" # bnat:primary
+	fallback="${BNAT_FALLBACK_BASE-https://release.bnat.ctai.dev}" # bnat:fallback
+	base="$primary"
 
 	need uname
 	need tar
 	if has curl; then
-		fetch() { curl -fsSL --retry 3 -o "$2" "$1"; }
-		final_url() { curl -fsSLI -o /dev/null -w '%{url_effective}' "$1"; }
+		# Give up on hosts that hang or crawl (blocked/throttled GitHub) instead of waiting forever.
+		fetch() { curl -fsSL --retry 2 --connect-timeout 10 --speed-limit 2048 --speed-time 20 -o "$2" "$1"; }
+		final_url() { curl -fsSLI --connect-timeout 10 -m 30 -o /dev/null -w '%{url_effective}' "$1"; }
 	elif has wget; then
-		fetch() { wget -q -O "$2" "$1"; }
-		final_url() { wget -q -S --spider "$1" 2>&1 | sed -n 's/^ *[Ll]ocation: *//p' | tail -n 1 | tr -d '\r'; }
+		fetch() { wget -q -T 20 -O "$2" "$1"; }
+		final_url() { wget -q -T 20 -S --spider "$1" 2>&1 | sed -n 's/^ *[Ll]ocation: *//p' | tail -n 1 | tr -d '\r'; }
 	else
 		die "curl or wget is required"
 	fi
@@ -53,8 +59,11 @@ main() {
 	fi
 
 	if [ "$version" = latest ]; then
-		tag=$(final_url "$base/latest" | sed -n 's#.*/tag/##p')
-		[ -n "$tag" ] || die "could not determine the latest release of $repo (no releases yet?)"
+		tag=$(latest_tag "$base")
+		if [ -z "$tag" ] && use_fallback; then
+			tag=$(latest_tag "$base")
+		fi
+		[ -n "$tag" ] || die "could not determine the latest release (no releases yet, or $base unreachable)"
 	else
 		tag="v${version#v}"
 	fi
@@ -84,8 +93,11 @@ main() {
 	else
 		say "downloading bnat $tag ($os/$arch)"
 	fi
-	fetch "$base/download/$tag/$archive" "$tmp/$archive" || die "download failed: $base/download/$tag/$archive"
-	fetch "$base/download/$tag/checksums.txt" "$tmp/checksums.txt" || die "could not download checksums.txt"
+	if ! fetch "$base/download/$tag/$archive" "$tmp/$archive"; then
+		use_fallback || die "download failed: $base/download/$tag/$archive"
+		fetch "$base/download/$tag/$archive" "$tmp/$archive" || die "download failed: $base/download/$tag/$archive"
+	fi
+	fetch "$base/download/$tag/checksums.txt" "$tmp/checksums.txt" || die "could not download checksums.txt from $base"
 
 	want=$(awk -v f="$archive" '$2 == f { print $1 }' "$tmp/checksums.txt")
 	[ -n "$want" ] || die "$archive is not listed in checksums.txt"
@@ -169,6 +181,15 @@ restart_services() {
 			say "restart system services to use the new version: sudo bnat service restart --all"
 		fi
 	fi
+}
+
+latest_tag() { final_url "$1/latest" 2>/dev/null | sed -n 's#.*/tag/##p'; }
+
+# use_fallback switches downloads to the fallback mirror, if there is one left to try.
+use_fallback() {
+	[ -n "$fallback" ] && [ "$base" != "$fallback" ] || return 1
+	say "$base is unreachable, using mirror $fallback"
+	base="$fallback"
 }
 
 # can_sudo: sudo works without a password, or we can prompt on the terminal.

@@ -307,11 +307,47 @@ func restartAll(m service.Manager, quiet bool) error {
 	return nil
 }
 
-// installScript can be overridden with BNAT_INSTALL_SCRIPT_URL (mirrors, testing).
-const installScript = "https://raw.githubusercontent.com/Suro4ek/bnat/main/install.sh"
+// Installer locations, tried in order. BNAT_INSTALL_SCRIPT_URL (a mirror,
+// testing) goes first when set; the release mirror covers networks where
+// GitHub is blocked.
+var installScripts = []string{
+	"https://raw.githubusercontent.com/Suro4ek/bnat/main/install.sh",
+	"https://release.bnat.ctai.dev/install.sh",
+}
 
-// runUpdate re-runs install.sh for the directory this binary lives in; it
-// replaces the binary in place and restarts bnat services.
+// fetchInstaller downloads install.sh from the first location that answers.
+func fetchInstaller() (string, error) {
+	srcs := installScripts
+	if v := os.Getenv("BNAT_INSTALL_SCRIPT_URL"); v != "" {
+		srcs = []string{v}
+	}
+	var errs []string
+	for _, src := range srcs {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, src, nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			var b []byte
+			if resp.StatusCode == http.StatusOK {
+				b, err = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			} else {
+				err = fmt.Errorf("HTTP %d", resp.StatusCode)
+			}
+			resp.Body.Close()
+			if err == nil && strings.HasPrefix(string(b), "#!") {
+				cancel()
+				return string(b), nil
+			}
+			if err == nil {
+				err = errors.New("not a shell script")
+			}
+		}
+		cancel()
+		errs = append(errs, fmt.Sprintf("%s: %v", src, err))
+	}
+	return "", fmt.Errorf("download installer:\n  %s", strings.Join(errs, "\n  "))
+}
+
 func runUpdate(args []string) error {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 	fs.Usage = func() {
@@ -325,27 +361,12 @@ func runUpdate(args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	src := installScript
-	if v := os.Getenv("BNAT_INSTALL_SCRIPT_URL"); v != "" {
-		src = v
-	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, src, nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("download installer: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download installer: HTTP %d", resp.StatusCode)
-	}
-	script, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	script, err := fetchInstaller()
 	if err != nil {
 		return err
 	}
 	cmd := exec.Command("sh", "-s")
-	cmd.Stdin = strings.NewReader(string(script))
+	cmd.Stdin = strings.NewReader(script)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	cmd.Env = append(os.Environ(), "BNAT_INSTALL_DIR="+filepath.Dir(exe), "BNAT_UPDATE=1")
 	if fs.NArg() > 0 {

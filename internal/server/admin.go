@@ -24,8 +24,14 @@ var templateFS embed.FS
 
 const sessionCookie = "bnat_session"
 
-// InstallCommand installs the bnat agent from GitHub releases (see install.sh).
-const InstallCommand = "curl -fsSL https://raw.githubusercontent.com/Suro4ek/bnat/main/install.sh | sh"
+// installCommand installs the bnat agent: from the release mirror when this
+// server runs one (clients can reach us, maybe not GitHub), else from GitHub.
+func (s *Server) installCommand() string {
+	if s.mirror != nil {
+		return "curl -fsSL " + s.mirror.self + "/install.sh | sh"
+	}
+	return "curl -fsSL " + githubRawScript + " | sh"
+}
 
 var (
 	pagesOnce sync.Once
@@ -250,7 +256,7 @@ func (s *Server) showCode(w http.ResponseWriter, r *http.Request, name, code str
 		"Code":    code,
 		"Minutes": int(PairCodeTTL.Minutes()),
 		"Login":   fmt.Sprintf("bnat login %s %s", s.adminURL(), code),
-		"Install": InstallCommand,
+		"Install": s.installCommand(),
 	})
 }
 

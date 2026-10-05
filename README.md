@@ -42,6 +42,14 @@ curl -fsSL https://raw.githubusercontent.com/Suro4ek/bnat/main/install.sh | sh
 
 Скрипт берёт последний релиз с GitHub, сверяет sha256 и кладёт `bnat` в `/usr/local/bin`. Если прав нет, использует sudo, а без sudo ставит в `~/.local/bin`. Конкретная версия: `… | BNAT_VERSION=v0.1.1 sh`, другая папка: `… | BNAT_INSTALL_DIR=~/bin sh`.
 
+Если GitHub недоступен, ставь с зеркала:
+
+```bash
+curl -fsSL https://release.bnat.ctai.dev/install.sh | sh
+```
+
+Установщик с GitHub и `bnat update` и сами переходят на зеркало, если GitHub не отвечает.
+
 Бинарники для Linux, macOS и Windows лежат в [Releases](https://github.com/Suro4ek/bnat/releases). Docker-образ: `ghcr.io/suro4ek/bnat` (по умолчанию запускает `bnat server`, для агента — `docker run ghcr.io/suro4ek/bnat http …`). Если есть Go, можно поставить так: `go install github.com/Suro4ek/bnat/cmd/bnat@latest`.
 
 ```bash
@@ -56,6 +64,21 @@ sudo bnat service logs server | grep password   # сгенерированный
 ```
 
 На первом запуске в лог печатается сгенерированный пароль админки. Свой пароль можно задать через `BNAT_ADMIN_PASSWORD`, но не стоит передавать его флагом `--admin-password`: так он виден в `ps`.
+
+## Зеркало релизов
+
+Сервер bnat может раздавать `install.sh` и файлы релизов на отдельном домене для клиентов, у которых не открывается GitHub:
+
+```bash
+bnat server --domain bnat.example.com --releases-host release.bnat.example.com
+# или BNAT_RELEASES_HOST=release.bnat.example.com
+```
+
+- `https://release.bnat.example.com/install.sh` качает всё с зеркала, а если зеркало не отвечает, идёт на GitHub.
+- Файлы скачиваются с GitHub при первом запросе и сохраняются в `data/releases/`. Когда выходит новый релиз, сервер сам заранее скачивает все его файлы. Если GitHub станет недоступен и с сервера, скачанные версии продолжат раздаваться.
+- На диске хранятся 5 последних релизов, более старые при запросе скачиваются заново.
+- Поддомен `*.bnat.example.com` уже покрыт DNS-записью, роутером Traefik и wildcard-сертификатом, так что настраивать ничего не надо. Имя `release` нельзя занять туннелем.
+- Если зеркало включено, команда установки в админке (в карточке с кодом привязки) ведёт на него.
 
 ## Docker
 

@@ -1,6 +1,10 @@
 package main
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Suro4ek/bnat/internal/service"
@@ -31,5 +35,26 @@ func TestFlagValue(t *testing.T) {
 	}
 	if v := flagValue([]string{"--name=box"}, "n", "name"); v != "box" {
 		t.Errorf("--name=: got %q", v)
+	}
+}
+
+func TestFetchInstallerFallsBack(t *testing.T) {
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "#!/bin/sh\necho mirror\n")
+	}))
+	defer good.Close()
+	blocked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "blocked", http.StatusForbidden)
+	}))
+	defer blocked.Close()
+
+	old := installScripts
+	defer func() { installScripts = old }()
+	installScripts = []string{"http://127.0.0.1:9/install.sh", blocked.URL + "/install.sh", good.URL + "/install.sh"}
+	t.Setenv("BNAT_INSTALL_SCRIPT_URL", "")
+
+	script, err := fetchInstaller()
+	if err != nil || !strings.Contains(script, "echo mirror") {
+		t.Fatalf("got %q, %v", script, err)
 	}
 }
