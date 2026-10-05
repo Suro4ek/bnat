@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,6 +37,7 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	drainOnCleanup(t, s)
 	ts := httptest.NewServer(s)
 	defer ts.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -162,6 +164,18 @@ func TestEndToEnd(t *testing.T) {
 	})
 }
 
+// drainOnCleanup waits for agent sessions to finish before the test's TempDir
+// is removed (cleanups run in reverse order, after the test's defers).
+func drainOnCleanup(t *testing.T, s *Server) {
+	t.Cleanup(func() {
+		waitFor(t, "agent sessions to close", func() bool {
+			s.mu.RLock()
+			defer s.mu.RUnlock()
+			return len(s.sessions) == 0
+		})
+	})
+}
+
 func (s *Server) tunnelPort(name string) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -245,3 +259,133 @@ func TestAgentAPIOnAnyHost(t *testing.T) {
 		}
 	}
 }
+
+// TestReconnectTakeover: an agent that comes back while the server still holds
+// its old, dead connection takes the tunnel over at once; a live holder keeps it.
+func TestReconnectTakeover(t *testing.T) {
+	s, err := New(Config{Domain: "127.0.0.1", HTTPAddr: ":0", DataDir: t.TempDir(), AdminPassword: "x", TCPBind: "127.0.0.1", PortMin: 40000, PortMax: 49999})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainOnCleanup(t, s)
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	code, _ := s.store.CreateClient("ci")
+	paired, err := client.Pair(ctx, ts.URL, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	echo := listenEcho(t)
+	startAgent := func(server string) context.CancelFunc {
+		actx, acancel := context.WithCancel(ctx)
+		a := &client.Client{
+			Config:  client.Config{Server: server, Token: paired.Token},
+			Tunnels: []client.Tunnel{{Req: proto.TunnelReq{Name: "box", Type: proto.TypeTCP}, Handler: client.ForwardHandler{Addr: echo}}},
+		}
+		go a.Run(actx)
+		return acancel
+	}
+	holder := func() *agentSession {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		if t := s.tunnels["box"]; t != nil {
+			return t.sess
+		}
+		return nil
+	}
+
+	// First agent goes through a proxy we can freeze, like a link that died
+	// without the server being told.
+	proxy := newFreezeProxy(t, ts.Listener.Addr().String())
+	stop1 := startAgent("http://" + proxy.addr)
+	defer stop1()
+	waitFor(t, "first agent", func() bool { return holder() != nil })
+	first := holder()
+
+	// A second live agent must not steal the tunnel.
+	stop2 := startAgent(ts.URL)
+	time.Sleep(2 * time.Second)
+	if holder() != first {
+		t.Fatal("tunnel was taken from a live agent")
+	}
+	stop2()
+
+	// Freeze the first agent's link; a new agent takes over within the ping timeout.
+	proxy.freeze()
+	start := time.Now()
+	stop3 := startAgent(ts.URL)
+	defer stop3()
+	deadline := time.Now().Add(stalePingTimeout + 10*time.Second)
+	for h := holder(); h == nil || h == first; h = holder() {
+		if time.Now().After(deadline) {
+			t.Fatal("dead agent was not replaced")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Logf("took over after %s", time.Since(start).Round(100*time.Millisecond))
+
+	c, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", s.tunnelPort("box")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	fmt.Fprint(c, "ping")
+	buf := make([]byte, 4)
+	c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "ping" {
+		t.Fatalf("tunnel after takeover: %q, %v", buf, err)
+	}
+}
+
+// freezeProxy forwards TCP until frozen; then it keeps the connections open
+// but stops passing data, so pings go unanswered.
+type freezeProxy struct {
+	addr   string
+	frozen atomic.Bool
+}
+
+func newFreezeProxy(t *testing.T, target string) *freezeProxy {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	p := &freezeProxy{addr: ln.Addr().String()}
+	pipe := func(dst, src net.Conn) {
+		buf := make([]byte, 32<<10)
+		for {
+			n, err := src.Read(buf)
+			for p.frozen.Load() {
+				time.Sleep(10 * time.Millisecond)
+			}
+			if n > 0 {
+				dst.Write(buf[:n])
+			}
+			if err != nil {
+				dst.Close()
+				return
+			}
+		}
+	}
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			u, err := net.Dial("tcp", target)
+			if err != nil {
+				c.Close()
+				continue
+			}
+			go pipe(u, c)
+			go pipe(c, u)
+		}
+	}()
+	return p
+}
+
+func (p *freezeProxy) freeze() { p.frozen.Store(true) }

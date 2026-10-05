@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -58,6 +59,10 @@ type Client struct {
 
 var errFatal = errors.New("fatal")
 
+// maxBackoff caps the pause between reconnect attempts, so a tunnel comes back
+// at most ~15s after the network does.
+const maxBackoff = 15 * time.Second
+
 // Run connects to the server and reconnects until ctx is cancelled or the
 // server rejects us permanently (bad token).
 func (c *Client) Run(ctx context.Context) error {
@@ -77,13 +82,15 @@ func (c *Client) Run(ctx context.Context) error {
 		if time.Since(start) > time.Minute {
 			backoff = time.Second
 		}
-		c.Log.Warn("disconnected, reconnecting", "err", err, "in", backoff)
+		// ±20% jitter so agents don't reconnect in lockstep after a server restart.
+		wait := backoff + time.Duration((rand.Float64()*0.4-0.2)*float64(backoff))
+		c.Log.Warn("disconnected, reconnecting", "err", err, "in", wait.Round(100*time.Millisecond))
 		select {
-		case <-time.After(backoff):
+		case <-time.After(wait):
 		case <-ctx.Done():
 			return nil
 		}
-		backoff = min(backoff*2, 30*time.Second)
+		backoff = min(backoff*2, maxBackoff)
 	}
 }
 

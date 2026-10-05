@@ -30,6 +30,11 @@ Agent (machine behind NAT):
   bnat http [-n name] [--host-header rewrite] <port|addr>
   bnat tcp  [-n name] <port|addr>
 
+Background service and updates:
+  sudo bnat service install ssh -n home        start at boot (systemd / launchd)
+  bnat service list | status | logs -f | uninstall
+  bnat update                                   update to the latest release
+
 Server (public VPS):
   bnat server --domain bnat.example.com [--tcp-host tun.bnat.example.com] [flags]
 
@@ -50,6 +55,10 @@ func main() {
 		err = runLogin(args)
 	case "ssh", "http", "tcp":
 		err = runTunnel(cmd, args)
+	case "service", "svc":
+		err = runService(args)
+	case "update", "upgrade":
+		err = runUpdate(args)
 	case "version", "--version":
 		fmt.Println("bnat", version)
 	case "help", "-h", "--help":

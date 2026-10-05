@@ -32,7 +32,7 @@ services:
 
   # SSH to the host itself through its own sshd (uses the host's authorized_keys).
   # For keys managed in the admin panel instead, run `bnat ssh` directly on the host
-  # (see deploy/bnat-agent.service): inside a container the built-in sshd would
+  # (`sudo bnat service install ssh -n home`): inside a container the built-in sshd would
   # only give a shell in that container.
   bnat-ssh:
     <<: *bnat

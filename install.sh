@@ -1,11 +1,14 @@
 #!/bin/sh
-# bnat installer: downloads a release binary from GitHub and verifies its checksum.
+# bnat installer and updater: downloads a release binary from GitHub, verifies
+# its checksum, and replaces an existing install in place (restarting services).
 #
 #   curl -fsSL https://raw.githubusercontent.com/Suro4ek/bnat/main/install.sh | sh
 #
 # Environment:
 #   BNAT_VERSION      release tag to install, e.g. v0.1.1 (default: latest)
-#   BNAT_INSTALL_DIR  target directory (default: /usr/local/bin, or ~/.local/bin without sudo)
+#   BNAT_INSTALL_DIR  target directory (default: where bnat already is, else /usr/local/bin,
+#                     or ~/.local/bin without sudo)
+#   BNAT_FORCE=1      reinstall even if this version is already installed
 #   BNAT_REPO         GitHub repo to download from (default: Suro4ek/bnat)
 #   BNAT_DOWNLOAD_BASE  releases URL override, for mirrors (default: https://github.com/$BNAT_REPO/releases)
 #
@@ -56,11 +59,31 @@ main() {
 		tag="v${version#v}"
 	fi
 
+	# An existing install is updated in place, so services keep using the same path.
+	existing=""
+	if [ -n "${BNAT_INSTALL_DIR:-}" ]; then
+		[ -x "$BNAT_INSTALL_DIR/bnat" ] && existing="$BNAT_INSTALL_DIR/bnat"
+	else
+		existing=$(command -v bnat 2>/dev/null || true)
+	fi
+	current=""
+	if [ -n "$existing" ]; then
+		current=$("$existing" version 2>/dev/null | awk '{ print $2 }' || true)
+		if [ "$current" = "${tag#v}" ] && [ "${BNAT_FORCE:-}" != 1 ]; then
+			say "bnat $current is already up to date ($existing)"
+			return 0
+		fi
+	fi
+
 	archive="bnat_${tag#v}_${os}_${arch}.tar.gz"
 	tmp=$(mktemp -d 2>/dev/null || mktemp -d -t bnat)
 	trap 'rm -rf "$tmp"' EXIT INT TERM
 
-	say "downloading bnat $tag ($os/$arch)"
+	if [ -n "$existing" ]; then
+		say "updating bnat ${current:-?} -> ${tag#v} ($os/$arch)"
+	else
+		say "downloading bnat $tag ($os/$arch)"
+	fi
 	fetch "$base/download/$tag/$archive" "$tmp/$archive" || die "download failed: $base/download/$tag/$archive"
 	fetch "$base/download/$tag/checksums.txt" "$tmp/checksums.txt" || die "could not download checksums.txt"
 
@@ -70,27 +93,42 @@ main() {
 	[ "$want" = "$got" ] || die "checksum mismatch for $archive (expected $want, got $got)"
 
 	tar -xzf "$tmp/$archive" -C "$tmp" bnat
-	chmod +x "$tmp/bnat"
+	chmod 755 "$tmp/bnat"
 
-	dir="${BNAT_INSTALL_DIR:-/usr/local/bin}"
 	if [ -n "${BNAT_INSTALL_DIR:-}" ]; then
-		mkdir -p "$dir" 2>/dev/null || true
-	fi
-	if [ -d "$dir" ] && [ -w "$dir" ]; then
-		mv -f "$tmp/bnat" "$dir/bnat"
-	elif [ -z "${BNAT_INSTALL_DIR:-}" ] && has sudo && { sudo -n true 2>/dev/null || [ -t 2 ]; }; then
-		say "installing to $dir (sudo)"
-		sudo mkdir -p "$dir"
-		sudo mv -f "$tmp/bnat" "$dir/bnat"
-	elif [ -z "${BNAT_INSTALL_DIR:-}" ]; then
-		dir="$HOME/.local/bin"
-		mkdir -p "$dir"
-		mv -f "$tmp/bnat" "$dir/bnat"
+		dir="$BNAT_INSTALL_DIR"
+	elif [ -n "$existing" ]; then
+		dir=$(dirname "$existing")
 	else
-		die "$dir is not writable"
+		dir=/usr/local/bin
+	fi
+	mkdir -p "$dir" 2>/dev/null || true
+	if [ -d "$dir" ] && [ -w "$dir" ]; then
+		SUDO=""
+	elif [ "$(id -u)" != 0 ] && can_sudo; then
+		SUDO=sudo
+		say "installing to $dir (sudo)"
+	elif [ -z "${BNAT_INSTALL_DIR:-}" ] && [ -z "$existing" ]; then
+		dir="$HOME/.local/bin"
+		SUDO=""
+	else
+		die "$dir is not writable (run as root or set BNAT_INSTALL_DIR)"
 	fi
 
-	say "installed $("$dir/bnat" version) to $dir/bnat"
+	# Copy next to the target, then rename: atomic, and safe while bnat is running.
+	$SUDO mkdir -p "$dir"
+	$SUDO cp "$tmp/bnat" "$dir/.bnat.new.$$"
+	$SUDO chmod 755 "$dir/.bnat.new.$$"
+	$SUDO mv -f "$dir/.bnat.new.$$" "$dir/bnat"
+
+	installed=$("$dir/bnat" version)
+	if [ -n "$existing" ]; then
+		say "updated to $installed ($dir/bnat)"
+		restart_services "$dir/bnat"
+		return 0
+	fi
+
+	say "installed $installed to $dir/bnat"
 	case ":$PATH:" in
 	*":$dir:"*) ;;
 	*) say "note: $dir is not in PATH; add it:  export PATH=\"$dir:\$PATH\"" ;;
@@ -98,13 +136,43 @@ main() {
 	cat <<EOF
 
 Next steps:
-  1. Admin panel → Clients → add a client, then run the command it shows:
+  1. Admin panel -> Clients -> add a client, then run the command it shows:
        bnat login https://bnat.example.com XXXX-XXXX
   2. Expose something:
        bnat ssh -n myhost        # SSH with keys from the admin panel
        bnat http 3000 -n app     # https://app.<your bnat domain>
+  3. Keep it running in the background and after reboots:
+       sudo bnat service install ssh -n myhost
+
+Update later by re-running this script or with: bnat update
 EOF
 }
+
+# restart_services restarts bnat services so they pick up the new binary:
+# per-user ones as the current user, system ones as root.
+restart_services() {
+	bin=$1
+	if [ "$(id -u)" != 0 ]; then
+		"$bin" service restart --all --quiet 2>/dev/null || true
+	fi
+	system_services=""
+	for f in /etc/systemd/system/bnat-*.service /Library/LaunchDaemons/com.github.suro4ek.bnat.*.plist; do
+		[ -e "$f" ] && system_services=1
+	done
+	if [ -n "$system_services" ]; then
+		if [ "$(id -u)" = 0 ]; then
+			"$bin" service restart --all --quiet || say "warning: some services failed to restart"
+		elif can_sudo; then
+			say "restarting bnat system services (sudo)"
+			sudo "$bin" service restart --all --quiet || say "warning: some services failed to restart"
+		else
+			say "restart system services to use the new version: sudo bnat service restart --all"
+		fi
+	fi
+}
+
+# can_sudo: sudo works without a password, or we can prompt on the terminal.
+can_sudo() { has sudo && { sudo -n true 2>/dev/null || [ -t 2 ]; }; }
 
 say() { printf 'bnat: %s\n' "$*" >&2; }
 die() {

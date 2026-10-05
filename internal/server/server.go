@@ -373,6 +373,8 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	defer s.dropSession(a)
 
+	s.evictStale(hello.Tunnels, log)
+
 	var infos []proto.TunnelInfo
 	for _, req := range hello.Tunnels {
 		info := s.register(a, req)
@@ -572,6 +574,56 @@ func (s *Server) serveTCP(t *tunnel) {
 			}
 			proto.Join(c, st)
 		}()
+	}
+}
+
+// stalePingTimeout is how long an agent holding a requested tunnel name has
+// to answer a ping before it is considered dead and replaced.
+const stalePingTimeout = 5 * time.Second
+
+// evictStale handles agents that come back before the server noticed their
+// old connection died (network drop, IP change, reboot): if a requested name
+// is held by a session that no longer answers pings, that session is closed
+// so the name can be taken over immediately instead of after keepalive
+// timeouts. Live sessions are left alone, so two running agents can't keep
+// kicking each other off.
+func (s *Server) evictStale(reqs []proto.TunnelReq, log *slog.Logger) {
+	holders := map[*agentSession]bool{}
+	s.mu.RLock()
+	for _, req := range reqs {
+		if t := s.tunnels[req.Name]; t != nil {
+			holders[t.sess] = true
+		}
+	}
+	s.mu.RUnlock()
+
+	var wg sync.WaitGroup
+	for old := range holders {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if alive(old.mux, stalePingTimeout) {
+				return
+			}
+			log.Info("replacing unresponsive agent", "old_agent", old.id, "old_remote", old.remote)
+			old.mux.Close()
+			s.dropSession(old) // free names and ports now; its handler will find nothing left
+		}()
+	}
+	wg.Wait()
+}
+
+func alive(mux *yamux.Session, timeout time.Duration) bool {
+	res := make(chan error, 1)
+	go func() {
+		_, err := mux.Ping()
+		res <- err
+	}()
+	select {
+	case err := <-res:
+		return err == nil
+	case <-time.After(timeout):
+		return false
 	}
 }
 
