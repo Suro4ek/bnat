@@ -68,6 +68,23 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # Install the just-published release the way users will.
+  verify-install:
+    needs: binaries
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: install.sh
+        env:
+          BNAT_VERSION: ${{ github.ref_name }}
+          BNAT_INSTALL_DIR: ${{ runner.temp }}/bin
+        run: |
+          sh install.sh
+          "$BNAT_INSTALL_DIR/bnat" version | grep -F "${BNAT_VERSION#v}"
+
   deploy:
     needs: binaries
     uses: ./.github/workflows/deploy.yml

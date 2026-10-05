@@ -33,6 +33,14 @@ A  tun.bnat.example.com  → 1.2.3.4   # (опционально) красиво
 
 Открыть порты: `80`, `443`, `20000-29999/tcp`.
 
+Быстрая установка (Linux, macOS; amd64 и arm64):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Suro4ek/bnat/main/install.sh | sh
+```
+
+Скрипт берёт последний релиз с GitHub, сверяет sha256 и кладёт `bnat` в `/usr/local/bin`. Если прав нет, использует sudo, а без sudo ставит в `~/.local/bin`. Конкретная версия: `… | BNAT_VERSION=v0.1.1 sh`, другая папка: `… | BNAT_INSTALL_DIR=~/bin sh`.
+
 Бинарники для Linux, macOS и Windows лежат в [Releases](https://github.com/Suro4ek/bnat/releases). Docker-образ: `ghcr.io/suro4ek/bnat` (по умолчанию запускает `bnat server`, для агента — `docker run ghcr.io/suro4ek/bnat http …`). Если есть Go, можно поставить так: `go install github.com/Suro4ek/bnat/cmd/bnat@latest`.
 
 ```bash
@@ -49,6 +57,7 @@ bnat server --domain bnat.example.com --tcp-host tun.bnat.example.com --data /va
 |---|---|
 | [`local-demo`](examples/local-demo/docker-compose.yml) | Всё на одной машине без домена и TLS: сервер, тестовое приложение whoami, HTTP- и SSH-агенты. Удобно, чтобы посмотреть, как всё работает. |
 | [`server`](examples/server/docker-compose.yml) | Сервер для VPS: `cp .env.example .env`, вписать домен, `docker compose up -d`. |
+| [`traefik`](examples/traefik/docker-compose.yml) | Сервер за Traefik v3: wildcard-сертификат через DNS-01, свои домены через HTTP-01, реальные IP клиентов. |
 | [`agent`](examples/agent/docker-compose.yml) | Агент на домашней машине: публикует веб-приложение из того же compose-проекта и SSH самого хоста. |
 
 Быстрый старт демо:
@@ -63,12 +72,13 @@ curl -H 'Host: whoami.localhost' localhost:8080
 
 Агенту в контейнере не нужен интерактивный `bnat login`. Достаточно передать `BNAT_SERVER` и `BNAT_PAIR_CODE`: при первом запуске он сам привяжется и сохранит токен в `/config`. Этот путь стоит смонтировать как volume, тогда при перезапусках код больше не понадобится.
 
-Если перед bnat уже стоит Caddy/nginx с TLS, запускайте `--tls=false --http 127.0.0.1:8080 --public-scheme https` и проксируйте на него `bnat.example.com` и `*.bnat.example.com`, не забыв про WebSocket upgrade.
+Если перед bnat уже стоит Caddy, nginx или Traefik с TLS, запускайте `--tls=false --http 127.0.0.1:8080 --public-scheme https --trusted-proxies private` и проксируйте на него `bnat.example.com` и `*.bnat.example.com` с поддержкой WebSocket. Флаг `--trusted-proxies` нужен, чтобы bnat брал реальный IP клиента и протокол из заголовков `X-Forwarded-*`. Без него в админке будет IP прокси, а лимит на подбор кодов привязки станет общим для всех клиентов. Готовый пример для Traefik: [`examples/traefik`](examples/traefik/docker-compose.yml).
 
 ## Использование агента
 
-1. Админка → **Clients** → создать клиента (например `home-server`). Появится одноразовый код на 15 минут:
+1. Админка → **Clients** → создать клиента (например `home-server`). Появится одноразовый код на 15 минут и готовые команды:
    ```bash
+   curl -fsSL https://raw.githubusercontent.com/Suro4ek/bnat/main/install.sh | sh
    bnat login https://bnat.example.com K7QM-3XPA
    ```
    Агент обменивает код на постоянный ключ, и в админке у клиента появляется `user@host` машины. Повторно код не сработает. Кнопка «New code» перепривязывает клиента к другой машине, старая при этом сразу отключается.
@@ -93,12 +103,12 @@ bnat ssh -n nas --local 192.168.1.10:22    # SSH другой машины в л
 
 ## CI/CD
 
-- **CI** (`.github/workflows/ci.yml`) запускается на каждый push и PR: gofmt, `go mod tidy`, `go vet`, тесты с `-race` на Linux и macOS, кросс-сборка под все платформы, сборка Docker-образа. В тестах есть e2e-сценарий: сервер, привязка по коду, TCP-, HTTP- и SSH-туннели.
+- **CI** (`.github/workflows/ci.yml`) запускается на каждый push и PR: gofmt, `go mod tidy`, `go vet`, тесты с `-race` на Linux и macOS, shellcheck для `install.sh`, кросс-сборка под все платформы, сборка Docker-образа. В тестах есть e2e-сценарий: сервер, привязка по коду, TCP-, HTTP- и SSH-туннели.
 - **Release** (`.github/workflows/release.yml`) запускается по тегу:
   ```bash
   git tag v0.1.0 && git push origin v0.1.0
   ```
-  Сначала идут тесты, затем GoReleaser собирает бинарники с чек-суммами и публикует GitHub Release, а образ `ghcr.io/suro4ek/bnat:{0.1.0,0.1,latest}` собирается под amd64 и arm64. Теги вида `v0.2.0-rc1` публикуются как pre-release, и `latest` на них не ставится.
+  Сначала идут тесты, затем GoReleaser собирает бинарники с чек-суммами и публикует GitHub Release, а образ `ghcr.io/suro4ek/bnat:{0.1.0,0.1,latest}` собирается под amd64 и arm64. Теги вида `v0.2.0-rc1` публикуются как pre-release, и `latest` на них не ставится. После публикации релиз устанавливается через `install.sh` на Linux и macOS, чтобы убедиться, что быстрая установка работает.
 - **Deploy** (`.github/workflows/deploy.yml`) после релиза обновляет бинарник на VPS по SSH и перезапускает `bnat-server`. Его можно запустить и вручную из вкладки Actions. Пока не настроен, он просто пропускается. Настройка в Settings → Secrets and variables → Actions:
   - variable `DEPLOY_HOST`: `bnat.example.com`
   - variable `DEPLOY_USER`: по умолчанию `root`; другому пользователю нужен sudo без пароля

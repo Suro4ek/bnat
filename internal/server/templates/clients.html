@@ -5,7 +5,8 @@
 <div class="muted">Pairing code for <b>{{.Name}}</b> · one-time, valid {{.Minutes}} minutes</div>
 <div style="font:600 34px ui-monospace,Menlo,monospace;letter-spacing:.12em;margin:10px 0">{{.Code}}</div>
 <div class="muted">Run on the client machine:</div>
-<pre>{{.Login}}</pre>
+<pre style="text-align:left">{{.Install}}   # skip if bnat is installed
+{{.Login}}</pre>
 </div>
 </div>
 {{end}}

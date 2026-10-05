@@ -97,6 +97,7 @@ func runServer(args []string) error {
 	fs.StringVar(&c.AdminPassword, "admin-password", env("BNAT_ADMIN_PASSWORD", ""), "admin password; generated on first start if empty (env BNAT_ADMIN_PASSWORD)")
 	fs.StringVar(&c.TCPBind, "tcp-bind", env("BNAT_TCP_BIND", ""), "address tcp/ssh tunnel ports bind to (env BNAT_TCP_BIND)")
 	fs.StringVar(&ports, "ports", env("BNAT_PORTS", "20000-29999"), "port range for tcp/ssh tunnels (env BNAT_PORTS)")
+	trusted := fs.String("trusted-proxies", env("BNAT_TRUSTED_PROXIES", ""), `reverse proxies whose X-Forwarded-* headers are trusted: IPs/CIDRs, or "private" (env BNAT_TRUSTED_PROXIES)`)
 	debug := fs.Bool("debug", false, "verbose logging")
 	fs.Parse(args)
 
@@ -107,6 +108,10 @@ func runServer(args []string) error {
 		return fmt.Errorf("bad --ports %q, want e.g. 20000-29999", ports)
 	}
 	setupLog(*debug)
+	var err error
+	if c.TrustedProxies, err = server.ParseTrustedProxies(*trusted); err != nil {
+		return err
+	}
 
 	s, err := server.New(c)
 	if err != nil {

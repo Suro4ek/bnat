@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -40,6 +41,9 @@ type Config struct {
 	TCPBind       string // address tcp tunnel listeners bind to
 	PortMin       int
 	PortMax       int
+	// TrustedProxies are reverse proxies in front of bnat whose
+	// X-Forwarded-For/Proto/Host headers are believed.
+	TrustedProxies []netip.Prefix
 }
 
 type Server struct {
@@ -299,7 +303,7 @@ func (s *Server) proxyHTTP(w http.ResponseWriter, r *http.Request, name string) 
 		Transport:     t.transport,
 		FlushInterval: -1,
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetXForwarded()
+			s.setForwarded(pr)
 			pr.Out.URL.Scheme = "http"
 			pr.Out.URL.Host = t.name
 			pr.Out.Host = pr.In.Host
@@ -355,7 +359,7 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 	a := &agentSession{
 		id:        randHex(4),
 		token:     tok,
-		remote:    clientIP(r),
+		remote:    s.clientIP(r),
 		hostname:  hello.Hostname,
 		user:      hello.User,
 		mux:       mux,
@@ -399,7 +403,7 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		reply(http.StatusMethodNotAllowed, proto.PairResponse{Error: "POST required"})
 		return
 	}
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	if !s.pairLimit.allow(ip) {
 		reply(http.StatusTooManyRequests, proto.PairResponse{Error: "too many attempts, try again later"})
 		return
@@ -733,12 +737,4 @@ func stripPort(h string) string {
 		return host
 	}
 	return h
-}
-
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }

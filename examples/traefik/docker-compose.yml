@@ -1,0 +1,95 @@
+# bnat behind Traefik v3. Traefik terminates TLS; bnat speaks plain HTTP inside
+# the docker network.
+#
+#   cp .env.example .env && $EDITOR .env
+#   docker compose up -d
+#
+# Certificates:
+#   - bnat.example.com and *.bnat.example.com share one wildcard certificate,
+#     which Let's Encrypt only issues via DNS-01. That needs an API token for
+#     your DNS provider (Cloudflare below; others: https://doc.traefik.io/traefik/https/acme/#providers).
+#   - Custom domains (CNAME → bnat.example.com) get their own certificates via
+#     HTTP-01 — list them in the bnat-custom router at the bottom.
+#
+# SSH/TCP tunnel ports don't go through Traefik: bnat publishes them directly.
+#
+# Already running Traefik? Delete the `traefik` service, attach bnat to your
+# Traefik network (see `networks` at the end) and rename the certresolvers
+# `le` / `le-http` in the labels to yours.
+
+services:
+  traefik:
+    # v3.6+: older Traefik fails against Docker Engine 29 ("API returned a 400")
+    image: traefik:v3.6
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=proxy
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      # Wildcard certificate for bnat.example.com + *.bnat.example.com
+      - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme-dns.json
+      - --certificatesresolvers.le.acme.dnschallenge.provider=cloudflare
+      # Per-domain certificates for custom domains
+      - --certificatesresolvers.le-http.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.le-http.acme.storage=/letsencrypt/acme-http.json
+      - --certificatesresolvers.le-http.acme.httpchallenge.entrypoint=web
+    environment:
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+    networks: [proxy]
+
+  bnat:
+    image: ghcr.io/suro4ek/bnat:latest
+    command: server
+    restart: unless-stopped
+    environment:
+      BNAT_DOMAIN: ${BNAT_DOMAIN}
+      BNAT_TCP_HOST: ${BNAT_TCP_HOST:-}
+      BNAT_ADMIN_PASSWORD: ${BNAT_ADMIN_PASSWORD:-}
+      BNAT_TLS: "false"         # Traefik does TLS
+      BNAT_HTTP: ":8080"
+      BNAT_PUBLIC_SCHEME: https # links in the admin panel / agent output
+      # Believe X-Forwarded-* from Traefik: real client IPs in the admin panel
+      # and logs, per-client rate limiting, correct X-Forwarded-Proto for apps.
+      # Safe because port 8080 is not published, only Traefik can reach it.
+      BNAT_TRUSTED_PROXIES: private
+      BNAT_PORTS: 20000-20099
+    ports:
+      - "20000-20099:20000-20099" # ssh/tcp tunnels, straight to bnat
+    volumes:
+      - ./data:/data
+    networks: [proxy]
+    labels:
+      traefik.enable: "true"
+      traefik.http.services.bnat.loadbalancer.server.port: "8080"
+
+      # Admin panel, agent endpoint and all HTTP tunnels (<name>.bnat.example.com)
+      traefik.http.routers.bnat.rule: Host(`${BNAT_DOMAIN}`) || HostRegexp(`^[a-z0-9-]+\.${BNAT_DOMAIN}$$`)
+      traefik.http.routers.bnat.entrypoints: websecure
+      traefik.http.routers.bnat.tls.certresolver: le
+      traefik.http.routers.bnat.tls.domains[0].main: ${BNAT_DOMAIN}
+      traefik.http.routers.bnat.tls.domains[0].sans: "*.${BNAT_DOMAIN}"
+
+      # Custom domains attached in the admin panel (Domains tab). Add each one
+      # to the rule, then `docker compose up -d` to apply.
+      # traefik.http.routers.bnat-custom.rule: Host(`app.yoursite.com`) || Host(`blog.other.org`)
+      # traefik.http.routers.bnat-custom.entrypoints: websecure
+      # traefik.http.routers.bnat-custom.tls.certresolver: le-http
+      # traefik.http.routers.bnat-custom.service: bnat
+
+networks:
+  proxy:
+    name: proxy
+    # Existing Traefik network instead:
+    # external: true
+    # name: traefik_default
